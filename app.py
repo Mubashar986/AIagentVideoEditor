@@ -1,108 +1,108 @@
 """
-YouTube Shorts AI Agent — Gradio Web Frontend
-Run this to get a web UI with a shareable link.
+YouTube Shorts AI Agent — Gradio Web UI.
 
-Usage:
-    python app.py
+Run with: python app.py
+Opens a shareable web interface for generating shorts.
 """
 
 import os
-import gradio as gr
+import sys
 from pathlib import Path
 
-# Ensure we're in local/free mode
-os.environ.setdefault("MODE", "local")
+# Ensure project root is on the path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from src.config import OUTPUT_DIR, GROQ_API_KEY
-from src.pipeline import run
+import gradio as gr
+
+from src.config import OUTPUT_DIR
 
 
-def process_video(url: str, num_shorts: int, groq_key: str, progress=gr.Progress()):
-    """Main processing function called by Gradio."""
+def process_video(url: str, num_shorts: int, groq_key: str, video_context: str):
+    """Process a video and return generated shorts."""
+    if not url or not url.strip():
+        return None, "❌ Please enter a YouTube URL"
 
-    # Set the API key if provided
-    if groq_key:
-        os.environ["GROQ_API_KEY"] = groq_key
+    if not groq_key or not groq_key.strip():
+        return None, "❌ Please enter your Groq API key (free at console.groq.com)"
 
-    if not url:
-        return [], "❌ Please enter a YouTube URL."
+    # Set environment variables for this run
+    os.environ["GROQ_API_KEY"] = groq_key.strip()
+    os.environ["MODE"] = "local"
 
-    if not groq_key and not GROQ_API_KEY:
-        return [], "❌ Please enter your Groq API key (free at console.groq.com)."
+    # Re-import to pick up the new key
+    from src.pipeline import run
 
     try:
-        progress(0.1, desc="📥 Downloading video...")
-        # Run the full pipeline
         output_paths = run(
-            url=url,
+            url=url.strip(),
             num_shorts=int(num_shorts),
-            dry_run=False,
+            video_context=video_context.strip() if video_context else "",
         )
 
-        if not output_paths:
-            return [], "⚠️ No shorts were generated. Try a different video."
-
-        # Return video files for display
-        status = f"✅ Generated {len(output_paths)} short(s)! Download them below."
-        return output_paths, status
+        if output_paths:
+            status = f"✅ Generated {len(output_paths)} short(s)!"
+            return output_paths, status
+        else:
+            return None, "⚠ No segments found — try a different video or context."
 
     except Exception as e:
-        return [], f"❌ Error: {str(e)}"
+        return None, f"❌ Error: {str(e)}"
 
 
 def create_ui():
-    """Build the Gradio interface."""
+    """Build and launch the Gradio interface."""
 
     with gr.Blocks(
         title="🎬 YouTube Shorts AI Agent",
         theme=gr.themes.Soft(
-            primary_hue="cyan",
-            secondary_hue="blue",
+            primary_hue="violet",
+            secondary_hue="amber",
         ),
-        css="""
-        .main-header { text-align: center; margin-bottom: 1rem; }
-        .output-videos { min-height: 200px; }
-        """,
     ) as app:
 
-        # Header
         gr.Markdown(
             """
             # 🎬 YouTube Shorts AI Agent
-            ### Turn any YouTube video into viral Shorts — 100% free
-            **Powered by:** faster-whisper (transcription) + Llama 3 via Groq (AI analysis) + MoviePy (editing)
-            """,
-            elem_classes="main-header",
+            ### Transform any video into viral-ready shorts — 100% free
+
+            **How it works:** Paste a URL → AI picks the best moments → Get 
+            upload-ready vertical shorts with animated captions.
+
+            **New:** Add a video context to get smarter picks 
+            (e.g. "cricket match — focus on wickets and celebrations").
+            """
         )
 
         with gr.Row():
-            with gr.Column(scale=2):
+            with gr.Column(scale=3):
                 url_input = gr.Textbox(
                     label="YouTube URL",
                     placeholder="https://www.youtube.com/watch?v=...",
                     max_lines=1,
                 )
-
             with gr.Column(scale=1):
                 num_shorts = gr.Slider(
-                    label="Number of Shorts",
                     minimum=1,
                     maximum=5,
-                    value=3,
+                    value=2,
                     step=1,
+                    label="Number of Shorts",
                 )
 
-        with gr.Accordion("🔑 API Key (Groq — free)", open=True):
-            gr.Markdown(
-                "Get a **free** API key at [console.groq.com](https://console.groq.com) "
-                "(no credit card needed)."
-            )
-            groq_key = gr.Textbox(
-                label="Groq API Key",
-                placeholder="gsk_...",
-                type="password",
-                max_lines=1,
-            )
+        with gr.Row():
+            with gr.Column(scale=2):
+                groq_key = gr.Textbox(
+                    label="Groq API Key (free)",
+                    placeholder="gsk_... (get free key at console.groq.com)",
+                    type="password",
+                    max_lines=1,
+                )
+            with gr.Column(scale=2):
+                video_context = gr.Textbox(
+                    label="Video Context (optional)",
+                    placeholder="e.g. 'cricket highlights - best wickets' or 'motivational speech - powerful quotes'",
+                    max_lines=1,
+                )
 
         generate_btn = gr.Button(
             "🚀 Generate Shorts",
@@ -110,42 +110,34 @@ def create_ui():
             size="lg",
         )
 
-        # Output area
-        status_text = gr.Markdown("", label="Status")
+        status_text = gr.Textbox(
+            label="Status",
+            interactive=False,
+        )
 
-        with gr.Row():
-            output_videos = gr.Files(
-                label="📁 Generated Shorts (click to download)",
-                file_count="multiple",
-                elem_classes="output-videos",
-            )
+        output_videos = gr.Files(
+            label="Generated Shorts",
+        )
 
-        # How it works
-        with gr.Accordion("ℹ️ How It Works", open=False):
-            gr.Markdown(
-                """
-                1. **Download** — Video is downloaded using yt-dlp
-                2. **Transcribe** — Audio is transcribed with faster-whisper (GPU)
-                3. **AI Analysis** — Llama 3 identifies the most viral-worthy segments
-                4. **Edit** — Each segment is cropped to 9:16, captions are burned in
-                5. **Export** — Upload-ready .mp4 shorts in the output folder
-                """
-            )
-
-        # Wire up the button
         generate_btn.click(
             fn=process_video,
-            inputs=[url_input, num_shorts, groq_key],
+            inputs=[url_input, num_shorts, groq_key, video_context],
             outputs=[output_videos, status_text],
         )
 
-    return app
+        gr.Markdown(
+            """
+            ---
+            **Tips:**
+            - Get a free Groq API key at [console.groq.com](https://console.groq.com)
+            - Use video context for better results (e.g. "cooking tutorial" or "podcast interview")
+            - Longer videos (10+ min) produce better variety in shorts
+            - Each short is 25-55 seconds with animated captions
+            """
+        )
+
+    app.launch(share=True, server_name="0.0.0.0", server_port=7860)
 
 
 if __name__ == "__main__":
-    app = create_ui()
-    app.launch(
-        share=True,  # Creates a public shareable link
-        server_name="0.0.0.0",
-        server_port=7860,
-    )
+    create_ui()

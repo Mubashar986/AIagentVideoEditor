@@ -23,9 +23,13 @@ Run the entire YouTube Shorts AI Agent for **free** on Google Colab — no API c
 ### Cell 1 — Clone the project & install dependencies
 
 ```python
-# Clone repo (or upload your project folder)
+# Always start from /content to avoid nested folders!
+%cd /content
+!rm -rf AIagentVideoEditor
+
+# Clone repo
 !git clone https://github.com/Mubashar986/AIagentVideoEditor.git
-%cd AIagentVideoEditor
+%cd /content/AIagentVideoEditor
 
 # Install all dependencies
 !pip install -q yt-dlp "moviepy>=2.0" faster-whisper groq gradio rich python-dotenv
@@ -58,8 +62,17 @@ print("✅ Config set!")
 ### Cell 3 — Option A: Run via CLI (quick test)
 
 ```python
-# Generate 2 shorts from a YouTube video
-!python main.py "https://youtu.be/BFWBaBdH2qw?si=JpQqX7n5H2rW221s" --shorts 2
+# Basic: generate 2 shorts
+!python main.py "https://www.youtube.com/watch?v=YOUR_VIDEO_ID" --shorts 2
+
+# With context for smarter picks (RECOMMENDED!):
+!python main.py "https://www.youtube.com/watch?v=YOUR_VIDEO_ID" --shorts 3 --context "cricket match highlights - focus on best wickets and celebrations"
+
+# More examples of --context:
+# --context "motivational speech - find the most powerful quotes"
+# --context "podcast interview - controversial takes and funny moments"
+# --context "cooking tutorial - key tips and plating reveals"
+# --context "gaming highlights - clutch plays and reactions"
 ```
 
 ---
@@ -78,7 +91,8 @@ Running on public URL: https://xxxxx.gradio.live
 **Click that link** — it opens a web app where you can:
 - Paste any YouTube URL
 - Pick number of shorts
-- Download the generated shorts
+- **Add video context** for smarter segment picks
+- Download the generated shorts with animated captions
 
 ---
 
@@ -87,17 +101,13 @@ Running on public URL: https://xxxxx.gradio.live
 ```python
 # List generated shorts
 import os
-output_dir = "output"
-files = os.listdir(output_dir)
-print(f"Generated {len(files)} shorts:")
-for f in files:
-    print(f"  📁 {f}")
-
-# Download to your computer
 from google.colab import files as colab_files
-for f_name in files:
-    if f_name.endswith(".mp4"):
-        colab_files.download(os.path.join(output_dir, f_name))
+
+output_dir = "output"
+for f in os.listdir(output_dir):
+    if f.endswith(".mp4"):
+        print(f"📁 {f}")
+        colab_files.download(os.path.join(output_dir, f))
 ```
 
 ---
@@ -129,3 +139,4 @@ Or just drag-and-drop the project folder into Colab's file panel.
 | Video download fails | Try a different URL, or update yt-dlp: `!pip install -U yt-dlp` |
 | Out of disk space | Delete old files: `!rm -rf downloads/* output/*` |
 | Session disconnects | Normal for free Colab — re-run from Cell 1 |
+| Nested folders | Always start Cell 1 with `%cd /content` |

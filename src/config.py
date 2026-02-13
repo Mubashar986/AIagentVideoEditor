@@ -38,16 +38,22 @@ WHISPER_LOCAL_MODEL = os.getenv("WHISPER_LOCAL_MODEL", "base")  # tiny/base/smal
 GROQ_MODEL = "llama-3.1-8b-instant"
 
 # ── Video / Shorts Settings ─────────────────────────────────────────────────
-SHORT_MAX_DURATION = 55
+SHORT_MIN_DURATION = 25   # minimum seconds per short
+SHORT_MAX_DURATION = 55   # maximum seconds per short
 SHORT_WIDTH = 1080
 SHORT_HEIGHT = 1920
 
 # ── Caption / Subtitle Settings ─────────────────────────────────────────────
-FONT_SIZE = 60
+FONT_SIZE = 70
 FONT_COLOR = "white"
+FONT_HIGHLIGHT_COLOR = "#FFD700"  # Gold — highlighted current word
 FONT_STROKE_COLOR = "black"
-FONT_STROKE_WIDTH = 3
-CAPTION_POSITION = ("center", 0.75)
+FONT_STROKE_WIDTH = 4
+WORDS_PER_GROUP = 3  # show N words at a time (word-by-word captions)
+
+# ── Hook Card Settings ──────────────────────────────────────────────────────
+HOOK_DURATION = 1.5      # seconds
+HOOK_FONT_SIZE = 80
 
 # ── Export Settings ──────────────────────────────────────────────────────────
 VIDEO_CODEC = "libx264"

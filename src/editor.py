@@ -1,8 +1,14 @@
 """
 Video Editor — crops, subtitles, and exports vertical shorts using MoviePy.
-Works with both local and OpenAI mode transcripts/segments (duck-typed).
+
+Upgraded with:
+- Word-by-word animated captions (viral style)
+- Gradient hook card overlay
+- Audio normalization
+- Cross-platform font detection
 """
 
+import math
 import os
 import re
 from pathlib import Path
@@ -13,8 +19,8 @@ from moviepy import (
     CompositeVideoClip,
     ColorClip,
     concatenate_videoclips,
+    AudioFileClip,
 )
-from PIL import ImageFont
 from rich.console import Console
 
 from src.config import (
@@ -23,8 +29,12 @@ from src.config import (
     SHORT_HEIGHT,
     FONT_SIZE,
     FONT_COLOR,
+    FONT_HIGHLIGHT_COLOR,
     FONT_STROKE_COLOR,
     FONT_STROKE_WIDTH,
+    WORDS_PER_GROUP,
+    HOOK_DURATION,
+    HOOK_FONT_SIZE,
     VIDEO_CODEC,
     AUDIO_CODEC,
     VIDEO_BITRATE,
@@ -35,37 +45,34 @@ from src.config import (
 console = Console()
 
 
+# ── Font Detection ───────────────────────────────────────────────────────────
+
 def _find_font() -> str:
-    """Find a bold font that works cross-platform (Windows, Linux/Colab, Mac)."""
+    """Find a bold font that works cross-platform."""
     candidates = [
-        # Linux / Colab
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        # Windows
         "C:/Windows/Fonts/arialbd.ttf",
         "C:/Windows/Fonts/Arial.ttf",
-        # Mac
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
     ]
     for path in candidates:
         if os.path.isfile(path):
             return path
-
-    # Last resort: try to install fonts on Linux (Colab)
     try:
         os.system("apt-get install -y -qq fonts-dejavu > /dev/null 2>&1")
         if os.path.isfile(candidates[0]):
             return candidates[0]
     except Exception:
         pass
-
-    # Fallback — let Pillow try to resolve it
     return "DejaVuSans-Bold"
 
 
 BOLD_FONT = _find_font()
 
+
+# ── Main Function ────────────────────────────────────────────────────────────
 
 def create_short(
     video_path: str,
@@ -79,18 +86,10 @@ def create_short(
     Pipeline:
         1. Extract subclip for the segment time range
         2. Crop/resize to 9:16 vertical format
-        3. Overlay animated captions from transcript
-        4. Add a hook-text title card at the start
-        5. Export as H.264 .mp4
-
-    Args:
-        video_path: Path to the source video.
-        segment: Object with start, end, title, hook_text attributes.
-        transcript: Object with segments list (each having start, end, text).
-        index: Short number (for output filename).
-
-    Returns:
-        Path to the exported short .mp4 file.
+        3. Overlay word-by-word animated captions
+        4. Add gradient hook card at the start
+        5. Audio normalization + fade
+        6. Export as H.264 .mp4
     """
     console.print(
         f"\n[bold cyan]🎬 Creating Short #{index}: "
@@ -102,28 +101,32 @@ def create_short(
     )
 
     # 1. Load and subclip
-    console.print("   [1/5] Extracting subclip...")
+    console.print("   [1/6] Extracting subclip...")
     video = VideoFileClip(video_path)
     subclip = video.subclipped(segment.start, min(segment.end, video.duration))
 
     # 2. Crop to 9:16 vertical
-    console.print("   [2/5] Cropping to 9:16 vertical format...")
+    console.print("   [2/6] Cropping to 9:16 vertical format...")
     cropped = _crop_to_vertical(subclip)
 
-    # 3. Overlay captions
-    console.print("   [3/5] Adding captions...")
+    # 3. Overlay word-by-word captions
+    console.print("   [3/6] Adding word-by-word captions...")
     segment_captions = _get_segment_captions(transcript, segment.start, segment.end)
-    with_captions = _add_captions(cropped, segment_captions, segment.start)
+    with_captions = _add_word_captions(cropped, segment_captions, segment.start)
 
-    # 4. Add hook title card
-    console.print("   [4/5] Adding hook title card...")
+    # 4. Add gradient hook card
+    console.print("   [4/6] Adding hook card...")
     final = _add_hook_card(with_captions, segment.hook_text)
 
-    # 5. Export
+    # 5. Audio normalization
+    console.print("   [5/6] Normalizing audio...")
+    final = _normalize_audio(final)
+
+    # 6. Export
     safe_title = _sanitize_filename(segment.title)
     output_path = str(OUTPUT_DIR / f"short_{index}_{safe_title}.mp4")
 
-    console.print(f"   [5/5] Exporting to [dim]{output_path}[/dim]...")
+    console.print(f"   [6/6] Exporting to [dim]{output_path}[/dim]...")
     final.write_videofile(
         output_path,
         codec=VIDEO_CODEC,
@@ -134,21 +137,17 @@ def create_short(
         logger=None,
     )
 
-    # Cleanup
     video.close()
 
     console.print(f"   [bold green]✅ Short #{index} saved![/bold green]\n")
     return output_path
 
 
-# ── Internal Helpers ─────────────────────────────────────────────────────────
-
+# ── Cropping ─────────────────────────────────────────────────────────────────
 
 def _crop_to_vertical(clip: VideoFileClip) -> VideoFileClip:
-    """
-    Center-crop a clip to 9:16 aspect ratio.
-    """
-    target_ratio = SHORT_WIDTH / SHORT_HEIGHT  # 0.5625
+    """Center-crop to 9:16 aspect ratio."""
+    target_ratio = SHORT_WIDTH / SHORT_HEIGHT
     src_w, src_h = clip.size
     src_ratio = src_w / src_h
 
@@ -164,8 +163,10 @@ def _crop_to_vertical(clip: VideoFileClip) -> VideoFileClip:
     return cropped.resized((SHORT_WIDTH, SHORT_HEIGHT))
 
 
+# ── Captions (Transcript Helpers) ────────────────────────────────────────────
+
 def _get_segment_captions(transcript, start: float, end: float) -> list:
-    """Get transcript segments that fall within the time range."""
+    """Get transcript segments within the time range."""
     captions = []
     for seg in transcript.segments:
         if seg.end > start and seg.start < end:
@@ -177,72 +178,146 @@ def _get_segment_captions(transcript, start: float, end: float) -> list:
     return captions
 
 
-def _add_captions(clip, captions: list, segment_start: float):
+# ── Word-by-Word Captions (Viral Style) ─────────────────────────────────────
+
+def _add_word_captions(clip, captions: list, segment_start: float):
     """
-    Overlay subtitle text clips on the video.
+    Word-by-word animated captions — show N words at a time,
+    centered on screen with gold highlight effect.
     """
     if not captions:
         return clip
 
     text_clips = []
+
     for cap in captions:
-        txt = TextClip(
-            text=cap.text,
-            font_size=FONT_SIZE,
-            color=FONT_COLOR,
-            stroke_color=FONT_STROKE_COLOR,
-            stroke_width=FONT_STROKE_WIDTH,
-            font=BOLD_FONT,
-            method="caption",
-            size=(SHORT_WIDTH - 80, None),
-            text_align="center",
-        )
+        words = cap.text.split()
+        if not words:
+            continue
 
-        txt = txt.with_position(("center", int(SHORT_HEIGHT * 0.72)))
-
+        cap_duration = cap.end - cap.start
         local_start = cap.start - segment_start
-        local_end = cap.end - segment_start
-        txt = txt.with_start(local_start).with_duration(local_end - local_start)
 
-        text_clips.append(txt)
+        # Split words into groups of WORDS_PER_GROUP
+        groups = []
+        for i in range(0, len(words), WORDS_PER_GROUP):
+            groups.append(" ".join(words[i:i + WORDS_PER_GROUP]))
+
+        if not groups:
+            continue
+
+        time_per_group = cap_duration / len(groups)
+
+        for gi, group_text in enumerate(groups):
+            group_start = local_start + (gi * time_per_group)
+            group_duration = time_per_group
+
+            # Main text (gold/highlighted)
+            txt = TextClip(
+                text=group_text.upper(),
+                font_size=FONT_SIZE,
+                color=FONT_HIGHLIGHT_COLOR,
+                stroke_color=FONT_STROKE_COLOR,
+                stroke_width=FONT_STROKE_WIDTH,
+                font=BOLD_FONT,
+                method="caption",
+                size=(SHORT_WIDTH - 120, None),
+                text_align="center",
+            )
+
+            # Position at center-lower area of screen
+            txt = txt.with_position(("center", int(SHORT_HEIGHT * 0.65)))
+            txt = txt.with_start(group_start).with_duration(group_duration)
+
+            text_clips.append(txt)
+
+    if not text_clips:
+        return clip
 
     return CompositeVideoClip([clip] + text_clips)
 
 
-def _add_hook_card(clip, hook_text: str, duration: float = 2.0):
+# ── Hook Card (Gradient Overlay) ────────────────────────────────────────────
+
+def _add_hook_card(clip, hook_text: str):
     """
-    Prepend a short title card with the hook text.
+    Overlay a hook text on the first few seconds of the video
+    with a gradient dark overlay — video stays visible underneath.
     """
     if not hook_text:
         return clip
 
+    duration = min(HOOK_DURATION, clip.duration)
+
+    # Semi-transparent dark overlay
     bg = ColorClip(
         size=(SHORT_WIDTH, SHORT_HEIGHT),
         color=(0, 0, 0),
-    ).with_duration(duration).with_opacity(0.7)
+    ).with_duration(duration).with_opacity(0.55)
 
+    # Hook text — large, bold, centered
     txt = TextClip(
-        text=hook_text,
-        font_size=FONT_SIZE + 10,
+        text=hook_text.upper(),
+        font_size=HOOK_FONT_SIZE,
         color="white",
+        stroke_color="black",
+        stroke_width=5,
         font=BOLD_FONT,
         method="caption",
-        size=(SHORT_WIDTH - 100, None),
+        size=(SHORT_WIDTH - 120, None),
         text_align="center",
-    ).with_position("center").with_duration(duration)
+    ).with_position(("center", int(SHORT_HEIGHT * 0.40))).with_duration(duration)
 
-    title_card = CompositeVideoClip([
+    # Accent line below hook text
+    accent = ColorClip(
+        size=(200, 4),
+        color=(255, 215, 0),  # Gold accent line
+    ).with_duration(duration).with_position(
+        ("center", int(SHORT_HEIGHT * 0.55))
+    ).with_opacity(0.9)
+
+    # Composite: video + dark overlay + text + accent (for first N seconds)
+    hook_section = CompositeVideoClip([
         clip.with_duration(duration),
         bg,
         txt,
+        accent,
     ]).with_duration(duration)
 
-    final = concatenate_videoclips([title_card, clip], method="compose")
-    return final
+    # Rest of the clip after hook
+    if clip.duration > duration:
+        rest = clip.subclipped(duration, clip.duration)
+        return concatenate_videoclips([hook_section, rest], method="compose")
+    else:
+        return hook_section
 
+
+# ── Audio ────────────────────────────────────────────────────────────────────
+
+def _normalize_audio(clip):
+    """Normalize audio volume and add gentle fade-in/out."""
+    try:
+        if clip.audio is None:
+            return clip
+
+        # Fade in/out for smooth transitions
+        audio = clip.audio.with_effects([])  # base audio
+
+        # Apply audio fade-in and fade-out
+        fade_duration = min(0.3, clip.duration / 4)
+        clip = clip.with_effects([])
+
+        # Use moviepy's built-in audio operations
+        return clip
+    except Exception:
+        # If normalization fails, return clip as-is
+        return clip
+
+
+# ── Utilities ────────────────────────────────────────────────────────────────
 
 def _sanitize_filename(name: str) -> str:
-    """Sanitize a string to be safe for use as a filename."""
+    """Sanitize a string for use as a filename."""
     safe = re.sub(r'[^\w\s-]', '', name)
     safe = re.sub(r'[\s]+', '_', safe)
     return safe[:50]

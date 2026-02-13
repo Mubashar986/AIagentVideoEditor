@@ -1,40 +1,54 @@
 """
-Pipeline Orchestrator — chains Download → Transcribe → Analyze → Edit.
-Automatically picks free (local) or paid (OpenAI) models based on config.
+Pipeline — full end-to-end: download → transcribe → AI analysis → edit.
+Supports both 'local' (free) and 'openai' (paid) modes.
 """
 
 from rich.console import Console
 from rich.panel import Panel
 
-from src.config import MODE, GROQ_API_KEY, OPENAI_API_KEY, WHISPER_LOCAL_MODEL
+from src.config import (
+    MODE,
+    GROQ_API_KEY,
+    WHISPER_LOCAL_MODEL,
+)
 from src.downloader import download_video
 from src.editor import create_short
 
 console = Console()
 
 
-def run(url: str, num_shorts: int = 3, dry_run: bool = False) -> list[str]:
+def run(
+    url: str,
+    num_shorts: int = 3,
+    dry_run: bool = False,
+    video_context: str = "",
+) -> list[str]:
     """
-    Execute the full YouTube → Shorts pipeline.
+    Full pipeline: URL → finished YouTube Shorts.
 
     Args:
         url: YouTube video URL.
         num_shorts: Number of shorts to generate.
-        dry_run: If True, skip the video editing step.
+        dry_run: If True, identify segments without rendering.
+        video_context: User description of the video content for
+                       smarter segment selection (e.g. "cricket highlights").
 
     Returns:
-        List of output file paths.
+        List of paths to exported .mp4 short files.
     """
     mode_label = "🆓 FREE (local models)" if MODE == "local" else "💳 OpenAI (paid)"
 
-    console.print(Panel.fit(
-        "[bold white]🚀 YouTube Shorts AI Agent[/bold white]\n"
+    info = (
+        f"🚀 YouTube Shorts AI Agent\n"
         f"   URL:    {url}\n"
         f"   Shorts: {num_shorts}\n"
         f"   Mode:   {mode_label}\n"
-        f"   Run:    {'🧪 DRY RUN' if dry_run else '🎬 FULL RUN'}",
-        border_style="bright_cyan",
-    ))
+        f"   Run:    {'🧪 DRY RUN (no render)' if dry_run else '🎬 FULL RUN'}"
+    )
+    if video_context:
+        info += f"\n   Context: {video_context}"
+
+    console.print(Panel(info))
 
     # ── Stage 1: Download ──────────────────────────────────────────────
     result = download_video(url)
@@ -55,6 +69,7 @@ def run(url: str, num_shorts: int = 3, dry_run: bool = False) -> list[str]:
             num_shorts=num_shorts,
             video_duration=result.duration,
             groq_api_key=GROQ_API_KEY,
+            video_context=video_context,
         )
     else:
         from src.analyzer import find_best_segments
@@ -64,18 +79,11 @@ def run(url: str, num_shorts: int = 3, dry_run: bool = False) -> list[str]:
             video_duration=result.duration,
         )
 
-    if not segments:
-        console.print("[bold red]❌ No viable segments found. Aborting.[/bold red]")
-        return []
-
-    # ── Stage 4: Video Editing ─────────────────────────────────────────
     if dry_run:
-        console.print(
-            "\n[bold yellow]🧪 DRY RUN — Skipping video editing.[/bold yellow]"
-        )
-        console.print("   The segments above would be turned into shorts.\n")
+        console.print("\n[bold yellow]🧪 Dry run — skipping video export.[/bold yellow]")
         return []
 
+    # ── Stage 4: Edit & Export ─────────────────────────────────────────
     output_paths = []
     for i, segment in enumerate(segments, 1):
         path = create_short(
@@ -86,16 +94,10 @@ def run(url: str, num_shorts: int = 3, dry_run: bool = False) -> list[str]:
         )
         output_paths.append(path)
 
-    _print_summary(output_paths)
+    console.print(
+        f"\n[bold green]🎉 Done! Generated {len(output_paths)} short(s).[/bold green]"
+    )
+    for p in output_paths:
+        console.print(f"   📁 {p}")
+
     return output_paths
-
-
-def _print_summary(paths: list[str]):
-    """Print a final summary."""
-    console.print(Panel.fit(
-        "[bold green]✅ All shorts generated![/bold green]\n\n"
-        + "\n".join(f"   📁 {p}" for p in paths)
-        + "\n\n   Ready to upload to YouTube Shorts!",
-        title="🎉 Complete",
-        border_style="green",
-    ))
