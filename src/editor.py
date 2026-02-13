@@ -3,6 +3,7 @@ Video Editor — crops, subtitles, and exports vertical shorts using MoviePy.
 Works with both local and OpenAI mode transcripts/segments (duck-typed).
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from moviepy import (
     ColorClip,
     concatenate_videoclips,
 )
+from PIL import ImageFont
 from rich.console import Console
 
 from src.config import (
@@ -31,6 +33,38 @@ from src.config import (
 )
 
 console = Console()
+
+
+def _find_font() -> str:
+    """Find a bold font that works cross-platform (Windows, Linux/Colab, Mac)."""
+    candidates = [
+        # Linux / Colab
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        # Windows
+        "C:/Windows/Fonts/arialbd.ttf",
+        "C:/Windows/Fonts/Arial.ttf",
+        # Mac
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+
+    # Last resort: try to install fonts on Linux (Colab)
+    try:
+        os.system("apt-get install -y -qq fonts-dejavu > /dev/null 2>&1")
+        if os.path.isfile(candidates[0]):
+            return candidates[0]
+    except Exception:
+        pass
+
+    # Fallback — let Pillow try to resolve it
+    return "DejaVuSans-Bold"
+
+
+BOLD_FONT = _find_font()
 
 
 def create_short(
@@ -158,7 +192,7 @@ def _add_captions(clip, captions: list, segment_start: float):
             color=FONT_COLOR,
             stroke_color=FONT_STROKE_COLOR,
             stroke_width=FONT_STROKE_WIDTH,
-            font="Arial-Bold",
+            font=BOLD_FONT,
             method="caption",
             size=(SHORT_WIDTH - 80, None),
             text_align="center",
@@ -191,7 +225,7 @@ def _add_hook_card(clip, hook_text: str, duration: float = 2.0):
         text=hook_text,
         font_size=FONT_SIZE + 10,
         color="white",
-        font="Arial-Bold",
+        font=BOLD_FONT,
         method="caption",
         size=(SHORT_WIDTH - 100, None),
         text_align="center",
