@@ -1,0 +1,15 @@
+# Core
+yt-dlp
+moviepy
+python-dotenv
+rich
+
+# OpenAI mode (paid)
+openai
+
+# Local / Free mode (Colab)
+faster-whisper
+groq
+
+# Web Frontend
+gradio
