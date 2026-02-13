@@ -24,8 +24,8 @@ Run the entire YouTube Shorts AI Agent for **free** on Google Colab — no API c
 
 ```python
 # Clone repo (or upload your project folder)
-!git clone https://github.com/YOUR_USERNAME/AIagent.git
-%cd AIagent
+!git clone https://github.com/Mubashar986/AIagentVideoEditor.git
+%cd AIagentVideoEditor
 
 # Install all dependencies
 !pip install -q yt-dlp moviepy faster-whisper groq gradio rich python-dotenv
