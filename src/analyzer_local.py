@@ -3,6 +3,7 @@ Local AI Segment Analyzer — uses Groq's free API (Llama 3) to identify
 the most engaging segments. Free tier: 30 req/min, no credit card.
 
 Now supports video_context for content-aware picks (e.g. "cricket highlights").
+Auto-truncates long transcripts to stay within Groq's token limits.
 """
 
 import json
@@ -11,9 +12,14 @@ from dataclasses import dataclass
 from rich.console import Console
 from rich.table import Table
 
-from src.config import SHORT_MIN_DURATION, SHORT_MAX_DURATION
+from src.config import SHORT_MIN_DURATION, SHORT_MAX_DURATION, GROQ_MODEL
 
 console = Console()
+
+# Groq free tier limit: ~6000 tokens/request
+# System prompt + user prompt overhead ≈ 800 tokens
+# Leave room for response ≈ 1500 tokens
+MAX_TRANSCRIPT_CHARS = 10000  # ~3000 tokens for transcript
 
 
 @dataclass
@@ -71,13 +77,7 @@ def find_best_segments(
     """
     Use Groq's free Llama 3 API to find the best short-worthy segments.
 
-    Args:
-        transcript: Transcript object with .segments list.
-        num_shorts: Number of shorts to generate.
-        video_duration: Total video duration (for validation).
-        groq_api_key: Free Groq API key.
-        video_context: User description of the video content, e.g.
-                       "cricket match highlights — focus on best wickets"
+    Auto-truncates long transcripts to stay within Groq's free tier limits.
     """
     from groq import Groq
 
@@ -93,15 +93,19 @@ def find_best_segments(
         context_section = f"""
 IMPORTANT VIDEO CONTEXT FROM THE USER:
 \"{video_context}\"
-Use this context to decide WHAT to look for. For example:
-- If it's a cricket match → focus on wickets, sixes, celebrations, dramatic moments
-- If it's a podcast → focus on shocking claims, funny moments, life advice
-- If it's a tutorial → focus on key tips, "aha" moments, common mistakes
-- If it's a speech → focus on powerful quotes, emotional peaks, call-to-action moments
-Adapt your segment selection to match the user's intent.
+Use this context to decide WHAT to look for. Adapt your segment selection to match the user's intent.
 """
 
     transcript_text = _format_transcript_for_llm(transcript)
+
+    # Auto-truncate if transcript is too long
+    if len(transcript_text) > MAX_TRANSCRIPT_CHARS:
+        original_len = len(transcript_text)
+        transcript_text = _smart_truncate(transcript_text, MAX_TRANSCRIPT_CHARS, video_duration)
+        console.print(
+            f"   [yellow]⚠ Transcript too long ({original_len:,} chars) — "
+            f"truncated to {len(transcript_text):,} chars to fit Groq limits[/yellow]"
+        )
 
     system = SYSTEM_PROMPT.format(
         min_duration=SHORT_MIN_DURATION,
@@ -122,13 +126,13 @@ Return ONLY a JSON array."""
     client = Groq(api_key=groq_api_key)
 
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model=GROQ_MODEL,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.7,
-        max_tokens=2000,
+        max_tokens=1500,
     )
 
     raw_content = response.choices[0].message.content.strip()
@@ -147,6 +151,52 @@ def _format_transcript_for_llm(transcript) -> str:
         timestamp = f"[{_fmt_time(seg.start)} → {_fmt_time(seg.end)}]"
         lines.append(f"{timestamp} {seg.text}")
     return "\n".join(lines)
+
+
+def _smart_truncate(transcript_text: str, max_chars: int, video_duration: float) -> str:
+    """
+    Intelligently truncate a long transcript while preserving coverage
+    of the entire video. Instead of cutting off the end, we sample
+    evenly from beginning, middle, and end.
+    """
+    lines = transcript_text.split("\n")
+    total_lines = len(lines)
+
+    if total_lines <= 10:
+        return transcript_text[:max_chars]
+
+    # Calculate how many lines we can keep
+    avg_line_len = len(transcript_text) / total_lines
+    target_lines = int(max_chars / avg_line_len)
+    target_lines = max(target_lines, 10)
+
+    if target_lines >= total_lines:
+        return transcript_text
+
+    # Strategy: keep lines evenly spread across the transcript
+    # This ensures the AI sees content from ALL parts of the video
+    step = total_lines / target_lines
+    selected_indices = []
+    pos = 0.0
+    while pos < total_lines and len(selected_indices) < target_lines:
+        idx = int(pos)
+        if idx < total_lines:
+            selected_indices.append(idx)
+        pos += step
+
+    # Always include first and last few lines for context
+    must_include = set(range(min(3, total_lines)))  # first 3
+    must_include.update(range(max(0, total_lines - 3), total_lines))  # last 3
+    all_indices = sorted(set(selected_indices) | must_include)
+
+    selected_lines = [lines[i] for i in all_indices if i < total_lines]
+    result = "\n".join(selected_lines)
+
+    # Final safety check
+    if len(result) > max_chars:
+        result = result[:max_chars]
+
+    return result
 
 
 def _parse_segments(raw_json: str, video_duration: float) -> list[Segment]:
@@ -197,13 +247,11 @@ def _remove_overlapping(segments: list[Segment]) -> list[Segment]:
     if not segments:
         return segments
 
-    # Sort by start time
     segments.sort(key=lambda s: s.start)
     result = [segments[0]]
 
     for seg in segments[1:]:
         last = result[-1]
-        # Require at least 10 seconds gap
         if seg.start >= last.end + 10:
             result.append(seg)
         else:

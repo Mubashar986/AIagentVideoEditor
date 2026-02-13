@@ -88,6 +88,7 @@ def create_short(
     transcript,
     index: int = 1,
     caption_style: str = "",
+    music_path: str = "",
 ) -> str:
     """
     Create a single YouTube Short from a video segment.
@@ -97,7 +98,9 @@ def create_short(
         2. Crop to 9:16 vertical + zoom effect
         3. Word-by-word captions with dark background
         4. Hook card overlay
-        5. Export + generate thumbnail
+        5. Background music mix
+        6. Export
+        7. Generate thumbnail
     """
     style = _get_style(caption_style)
 
@@ -109,33 +112,46 @@ def create_short(
         f"   Time: {_fmt(segment.start)} → {_fmt(segment.end)} "
         f"({segment.end - segment.start:.0f}s)"
     )
-    console.print(f"   Style: [bold]{caption_style or CAPTION_STYLE}[/bold]\n")
+    console.print(f"   Style: [bold]{caption_style or CAPTION_STYLE}[/bold]")
+    if music_path:
+        console.print(f"   Music: [bold]✅ enabled[/bold]\n")
+    else:
+        console.print("")
 
     # 1. Load and subclip
-    console.print("   [1/6] Extracting subclip...")
+    console.print("   [1/7] Extracting subclip...")
     video = VideoFileClip(video_path)
     subclip = video.subclipped(segment.start, min(segment.end, video.duration))
 
     # 2. Crop to 9:16 vertical + zoom
-    console.print("   [2/6] Cropping to 9:16 + zoom effect...")
+    console.print("   [2/7] Cropping to 9:16 + zoom effect...")
     cropped = _crop_to_vertical(subclip)
     if ZOOM_ENABLED:
         cropped = _apply_zoom(cropped)
 
     # 3. Word-by-word captions with background
-    console.print("   [3/6] Adding captions...")
+    console.print("   [3/7] Adding captions...")
     segment_captions = _get_segment_captions(transcript, segment.start, segment.end)
     with_captions = _add_styled_captions(cropped, segment_captions, segment.start, style)
 
     # 4. Hook card overlay
-    console.print("   [4/6] Adding hook card...")
-    final = _add_hook_card(with_captions, segment.hook_text)
+    console.print("   [4/7] Adding hook card...")
+    with_hook = _add_hook_card(with_captions, segment.hook_text)
 
-    # 5. Export
+    # 5. Background music
+    if music_path:
+        console.print("   [5/7] Mixing background music...")
+        from src.music import mix_audio
+        final = mix_audio(with_hook, music_path, music_volume=0.15)
+    else:
+        console.print("   [5/7] No background music (use --music to add)")
+        final = with_hook
+
+    # 6. Export
     safe_title = _sanitize_filename(segment.title)
     output_path = str(OUTPUT_DIR / f"short_{index}_{safe_title}.mp4")
 
-    console.print(f"   [5/6] Exporting to [dim]{output_path}[/dim]...")
+    console.print(f"   [6/7] Exporting to [dim]{output_path}[/dim]...")
     final.write_videofile(
         output_path,
         codec=VIDEO_CODEC,
@@ -146,8 +162,8 @@ def create_short(
         logger=None,
     )
 
-    # 6. Generate thumbnail
-    console.print("   [6/6] Generating thumbnail...")
+    # 7. Generate thumbnail
+    console.print("   [7/7] Generating thumbnail...")
     thumb_path = _generate_thumbnail(
         video_path, segment, safe_title, index
     )

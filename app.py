@@ -4,6 +4,7 @@ YouTube Shorts AI Agent — Gradio Web UI.
 Features:
 - Video context for smart segment picks
 - Caption style presets
+- Background music from URL
 - Thumbnail generation
 - Batch URL processing
 
@@ -22,7 +23,7 @@ from src.config import OUTPUT_DIR, THUMBNAILS_DIR
 
 
 def process_video(url: str, num_shorts: int, groq_key: str,
-                   video_context: str, caption_style: str):
+                   video_context: str, caption_style: str, music_url: str):
     """Process a video and return generated shorts."""
     if not url or not url.strip():
         return None, "❌ Please enter a YouTube URL"
@@ -33,20 +34,19 @@ def process_video(url: str, num_shorts: int, groq_key: str,
     os.environ["GROQ_API_KEY"] = groq_key.strip()
     os.environ["MODE"] = "local"
 
-    from src.pipeline import run
+    from src.pipeline import run, run_batch
 
     try:
-        # Handle multiple URLs (batch mode)
         urls = [u.strip() for u in url.strip().split("\n") if u.strip()]
 
         all_paths = []
         if len(urls) > 1:
-            from src.pipeline import run_batch
             all_paths = run_batch(
                 urls=urls,
                 num_shorts=int(num_shorts),
                 video_context=video_context.strip() if video_context else "",
                 caption_style=caption_style.lower() if caption_style else "",
+                music_url=music_url.strip() if music_url else "",
             )
         else:
             all_paths = run(
@@ -54,9 +54,10 @@ def process_video(url: str, num_shorts: int, groq_key: str,
                 num_shorts=int(num_shorts),
                 video_context=video_context.strip() if video_context else "",
                 caption_style=caption_style.lower() if caption_style else "",
+                music_url=music_url.strip() if music_url else "",
             )
 
-        # Collect thumbnails too
+        # Collect thumbnails
         thumb_paths = []
         if THUMBNAILS_DIR.exists():
             thumb_paths = [
@@ -92,10 +93,8 @@ def create_ui():
             # 🎬 YouTube Shorts AI Agent
             ### Transform any video into viral-ready shorts — 100% free
 
-            **Features:** Word-by-word captions • Caption style presets • Ken Burns zoom • 
-            Auto thumbnails • Smart AI segment picks • Batch processing
-
-            Paste one URL, or multiple URLs (one per line) for batch mode.
+            **Features:** Word-by-word captions • 4 caption styles • Ken Burns zoom • 
+            Background music • Auto thumbnails • Batch processing
             """
         )
 
@@ -103,7 +102,7 @@ def create_ui():
             with gr.Column(scale=3):
                 url_input = gr.Textbox(
                     label="YouTube URL(s)",
-                    placeholder="https://www.youtube.com/watch?v=...\n(paste multiple URLs for batch mode)",
+                    placeholder="https://www.youtube.com/watch?v=...\n(one per line for batch)",
                     lines=2,
                 )
             with gr.Column(scale=1):
@@ -115,22 +114,30 @@ def create_ui():
         with gr.Row():
             groq_key = gr.Textbox(
                 label="Groq API Key (free)",
-                placeholder="gsk_... (get free key at console.groq.com)",
+                placeholder="gsk_...",
                 type="password",
                 max_lines=1,
                 scale=2,
             )
             video_context = gr.Textbox(
                 label="Video Context",
-                placeholder="e.g. 'cricket - best wickets' or 'podcast - funny moments'",
+                placeholder="e.g. 'cricket - best wickets'",
                 max_lines=1,
                 scale=2,
             )
+
+        with gr.Row():
             caption_style = gr.Dropdown(
                 label="Caption Style",
                 choices=["hormozi", "beast", "subtle", "karaoke"],
                 value="hormozi",
                 scale=1,
+            )
+            music_url = gr.Textbox(
+                label="🎵 Background Music URL (optional)",
+                placeholder="YouTube/SoundCloud URL or direct MP3 link",
+                max_lines=1,
+                scale=3,
             )
 
         generate_btn = gr.Button(
@@ -144,23 +151,22 @@ def create_ui():
 
         generate_btn.click(
             fn=process_video,
-            inputs=[url_input, num_shorts, groq_key, video_context, caption_style],
+            inputs=[url_input, num_shorts, groq_key, video_context, caption_style, music_url],
             outputs=[output_files, status_text],
         )
 
         gr.Markdown(
             """
             ---
-            **Caption Styles:**
-            | Style | Look |
-            |-------|------|
-            | **hormozi** | ALL CAPS, gold highlight, 3 words at a time |
-            | **beast** | Bold, red highlight, 2 words at a time |
-            | **subtle** | Small white text at bottom |
-            | **karaoke** | Medium text, white highlight on dim |
+            | Style | Look | Music Tips |
+            |-------|------|------------|
+            | **hormozi** | Gold highlight, ALL CAPS, 3 words | Lo-fi beats for motivational |
+            | **beast** | Red highlight, bold, 2 words | Energetic EDM for sports/gaming |
+            | **subtle** | Small white at bottom | Calm ambient for docs |
+            | **karaoke** | White on dim, 4 words | Any genre |
 
-            **Tips:** Use `--context` for smarter picks • Longer videos = better variety • 
-            Free Groq key at [console.groq.com](https://console.groq.com)
+            🎵 **Music:** Paste any YouTube music URL, SoundCloud link, or direct .mp3 URL.
+            The music plays at 15% volume under the original video audio.
             """
         )
 

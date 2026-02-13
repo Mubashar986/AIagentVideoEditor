@@ -2,6 +2,7 @@
 Pipeline — full end-to-end: download → transcribe → AI analysis → edit.
 Supports both 'local' (free) and 'openai' (paid) modes.
 Supports single URL and batch playlist processing.
+Supports background music from URL.
 """
 
 from rich.console import Console
@@ -25,6 +26,7 @@ def run(
     dry_run: bool = False,
     video_context: str = "",
     caption_style: str = "",
+    music_url: str = "",
 ) -> list[str]:
     """
     Full pipeline: URL → finished YouTube Shorts.
@@ -35,6 +37,7 @@ def run(
         dry_run: If True, identify segments without rendering.
         video_context: Description of video content for smarter picks.
         caption_style: Caption preset (hormozi/beast/subtle/karaoke).
+        music_url: URL to background music (YouTube, SoundCloud, or MP3 link).
 
     Returns:
         List of paths to exported .mp4 short files.
@@ -52,8 +55,16 @@ def run(
     )
     if video_context:
         info += f"\n   Context: {video_context}"
+    if music_url:
+        info += f"\n   Music:   🎵 {music_url[:60]}..."
 
     console.print(Panel(info))
+
+    # ── Stage 0: Download background music (if provided) ───────────────
+    music_path = ""
+    if music_url:
+        from src.music import download_music
+        music_path = download_music(music_url)
 
     # ── Stage 1: Download ──────────────────────────────────────────────
     result = download_video(url)
@@ -97,6 +108,7 @@ def run(
             transcript=transcript,
             index=i,
             caption_style=caption_style,
+            music_path=music_path,
         )
         output_paths.append(path)
 
@@ -114,18 +126,10 @@ def run_batch(
     num_shorts: int = 2,
     video_context: str = "",
     caption_style: str = "",
+    music_url: str = "",
 ) -> list[str]:
     """
     Process multiple video URLs in batch.
-
-    Args:
-        urls: List of YouTube URLs.
-        num_shorts: Shorts per video.
-        video_context: Context description.
-        caption_style: Caption preset.
-
-    Returns:
-        All output paths across all videos.
     """
     console.print(
         f"\n[bold cyan]📦 Batch Mode: Processing {len(urls)} videos[/bold cyan]\n"
@@ -140,6 +144,7 @@ def run_batch(
                 num_shorts=num_shorts,
                 video_context=video_context,
                 caption_style=caption_style,
+                music_url=music_url,
             )
             all_paths.extend(paths)
         except Exception as e:

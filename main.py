@@ -3,10 +3,9 @@ YouTube Shorts AI Agent — CLI entry point.
 
 Usage:
     python main.py "URL" --shorts 3
-    python main.py "URL" --shorts 2 --context "cricket highlights"
-    python main.py "URL" --shorts 3 --style beast
+    python main.py "URL" --shorts 2 --context "cricket highlights" --style beast
+    python main.py "URL" --shorts 3 --music "https://youtube.com/watch?v=MUSIC_ID"
     python main.py "URL1" "URL2" --shorts 2 --batch
-    python main.py "URL" --dry-run
 """
 
 import argparse
@@ -53,6 +52,12 @@ def main():
         help="Caption style preset (default: hormozi)",
     )
     parser.add_argument(
+        "--music",
+        type=str,
+        default="",
+        help="Background music URL (YouTube, SoundCloud, or direct MP3 link)",
+    )
+    parser.add_argument(
         "--batch",
         action="store_true",
         help="Process multiple URLs in batch mode",
@@ -82,21 +87,21 @@ def main():
 
     try:
         if args.batch or len(args.urls) > 1:
-            # Batch mode: multiple URLs
             output_paths = run_batch(
                 urls=args.urls,
                 num_shorts=args.shorts,
                 video_context=args.context,
                 caption_style=args.style,
+                music_url=args.music,
             )
         else:
-            # Single URL
             output_paths = run(
                 url=args.urls[0],
                 num_shorts=args.shorts,
                 dry_run=args.dry_run,
                 video_context=args.context,
                 caption_style=args.style,
+                music_url=args.music,
             )
     except KeyboardInterrupt:
         console.print("\n[yellow]⚠ Cancelled by user.[/yellow]")
