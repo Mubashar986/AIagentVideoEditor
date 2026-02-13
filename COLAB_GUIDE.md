@@ -20,113 +20,81 @@ Run the entire YouTube Shorts AI Agent for **free** on Google Colab — no API c
 
 ---
 
-### Cell 1 — Clone the project & install dependencies
+### Cell 1 — Clone & install
 
 ```python
-# Always start from /content to avoid nested folders!
 %cd /content
 !rm -rf AIagentVideoEditor
 
-# Clone repo
 !git clone https://github.com/Mubashar986/AIagentVideoEditor.git
 %cd /content/AIagentVideoEditor
 
-# Install all dependencies
-!pip install -q yt-dlp "moviepy>=2.0" faster-whisper groq gradio rich python-dotenv
+!pip install -q yt-dlp "moviepy>=2.0" faster-whisper groq gradio rich python-dotenv numpy Pillow
 ```
-
-> **Note:** If your repo isn't on GitHub, you can upload the project folder
-> using Colab's file panel (📁 icon on the left) or mount Google Drive.
 
 ---
 
-### Cell 2 — Set your API key & config
+### Cell 2 — Set API key
 
 ```python
 import os
-
-# Set your free Groq API key (get it at https://console.groq.com)
 os.environ["GROQ_API_KEY"] = "gsk_YOUR_KEY_HERE"  # ← paste your key
-
-# Use free local models
 os.environ["MODE"] = "local"
-
-# Whisper model size: tiny (fastest) | base (good) | small (better) | medium | large-v3 (best)
 os.environ["WHISPER_LOCAL_MODEL"] = "base"
-
 print("✅ Config set!")
 ```
 
 ---
 
-### Cell 3 — Option A: Run via CLI (quick test)
+### Cell 3 — Option A: CLI (quick test)
 
 ```python
-# Basic: generate 2 shorts
-!python main.py "https://www.youtube.com/watch?v=YOUR_VIDEO_ID" --shorts 2
+# Basic:
+!python main.py "https://www.youtube.com/watch?v=VIDEO_ID" --shorts 2
 
-# With context for smarter picks (RECOMMENDED!):
-!python main.py "https://www.youtube.com/watch?v=YOUR_VIDEO_ID" --shorts 3 --context "cricket match highlights - focus on best wickets and celebrations"
+# With context + style:
+!python main.py "https://www.youtube.com/watch?v=VIDEO_ID" --shorts 3 \
+    --context "cricket match - best wickets and celebrations" \
+    --style beast
 
-# More examples of --context:
-# --context "motivational speech - find the most powerful quotes"
-# --context "podcast interview - controversial takes and funny moments"
-# --context "cooking tutorial - key tips and plating reveals"
-# --context "gaming highlights - clutch plays and reactions"
+# Batch mode (multiple videos):
+!python main.py "URL1" "URL2" --shorts 2 --batch \
+    --context "highlights" --style hormozi
 ```
+
+#### Caption Styles:
+| Style | Look |
+|-------|------|
+| `hormozi` | ALL CAPS, gold highlight, 3 words/group |
+| `beast` | Bold, red highlight, 2 words/group |
+| `subtle` | Small white text at bottom |
+| `karaoke` | Medium text, white on dim |
 
 ---
 
-### Cell 3 — Option B: Launch the Gradio Web UI (recommended!)
+### Cell 3 — Option B: Gradio Web UI (recommended!)
 
 ```python
-# This launches a web UI and gives you a PUBLIC shareable link
 !python app.py
 ```
 
-After running, you'll see:
-```
-Running on public URL: https://xxxxx.gradio.live
-```
-**Click that link** — it opens a web app where you can:
-- Paste any YouTube URL
-- Pick number of shorts
-- **Add video context** for smarter segment picks
-- Download the generated shorts with animated captions
+Click the public URL → paste URL, pick style, add context, generate!
 
 ---
 
-### Cell 4 — Download your shorts (if using CLI)
+### Cell 4 — Download shorts + thumbnails
 
 ```python
-# List generated shorts
 import os
 from google.colab import files as colab_files
 
-output_dir = "output"
-for f in os.listdir(output_dir):
-    if f.endswith(".mp4"):
-        print(f"📁 {f}")
-        colab_files.download(os.path.join(output_dir, f))
+for folder in ["output", "thumbnails"]:
+    if os.path.exists(folder):
+        for f in os.listdir(folder):
+            path = os.path.join(folder, f)
+            print(f"📁 {path}")
+            colab_files.download(path)
 ```
-
----
-
-## Alternative: Upload Project Without GitHub
-
-If you don't want to push to GitHub:
-
-```python
-# Mount Google Drive
-from google.colab import drive
-drive.mount('/content/drive')
-
-# Copy project from Drive
-!cp -r "/content/drive/MyDrive/AIagent" /content/AIagent
-%cd /content/AIagent
-```
-
-Or just drag-and-drop the project folder into Colab's file panel.
 
 ---
 
@@ -134,9 +102,9 @@ Or just drag-and-drop the project folder into Colab's file panel.
 
 | Problem | Solution |
 |---------|----------|
-| "No GPU available" | Go to Runtime → Change runtime type → T4 GPU |
-| Groq rate limit | Wait 60 seconds and try again (free tier = 30 req/min) |
-| Video download fails | Try a different URL, or update yt-dlp: `!pip install -U yt-dlp` |
-| Out of disk space | Delete old files: `!rm -rf downloads/* output/*` |
+| "No GPU available" | Runtime → Change runtime type → T4 GPU |
+| Groq rate limit | Wait 60s (free = 30 req/min) |
+| Video download fails | `!pip install -U yt-dlp` |
+| Out of disk space | `!rm -rf downloads/* output/* thumbnails/*` |
 | Session disconnects | Normal for free Colab — re-run from Cell 1 |
-| Nested folders | Always start Cell 1 with `%cd /content` |
+| Nested folders | Always start with `%cd /content` |
