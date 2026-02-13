@@ -28,7 +28,7 @@ Run the entire YouTube Shorts AI Agent for **free** on Google Colab — no API c
 %cd AIagentVideoEditor
 
 # Install all dependencies
-!pip install -q yt-dlp moviepy faster-whisper groq gradio rich python-dotenv
+!pip install -q yt-dlp "moviepy>=2.0" faster-whisper groq gradio rich python-dotenv
 ```
 
 > **Note:** If your repo isn't on GitHub, you can upload the project folder
@@ -59,7 +59,7 @@ print("✅ Config set!")
 
 ```python
 # Generate 2 shorts from a YouTube video
-!python main.py "https://www.youtube.com/watch?v=YOUR_VIDEO_ID" --shorts 2
+!python main.py "https://youtu.be/BFWBaBdH2qw?si=JpQqX7n5H2rW221s" --shorts 2
 ```
 
 ---

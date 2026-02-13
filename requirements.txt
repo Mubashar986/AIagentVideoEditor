@@ -1,6 +1,6 @@
 # Core
 yt-dlp
-moviepy
+moviepy>=2.0
 python-dotenv
 rich
 
