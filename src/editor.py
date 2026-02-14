@@ -8,7 +8,6 @@ Video Editor — Premium quality shorts with:
 - Cross-platform font detection
 """
 
-import math
 import os
 import re
 import numpy as np
@@ -54,6 +53,7 @@ def _find_font() -> str:
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
         "C:/Windows/Fonts/arialbd.ttf",
         "C:/Windows/Fonts/Arial.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
@@ -61,14 +61,18 @@ def _find_font() -> str:
     ]
     for path in candidates:
         if os.path.isfile(path):
+            console.print(f"   [dim]Font: {path}[/dim]")
             return path
+
+    # Try installing fonts on Linux/Colab
     try:
         os.system("apt-get install -y -qq fonts-dejavu > /dev/null 2>&1")
         if os.path.isfile(candidates[0]):
             return candidates[0]
     except Exception:
         pass
-    return "DejaVuSans-Bold"
+
+    return "Helvetica-Bold"
 
 
 BOLD_FONT = _find_font()
@@ -78,6 +82,48 @@ def _get_style(style_name: str = "") -> dict:
     """Get caption style config, defaulting to CAPTION_STYLE."""
     name = style_name or CAPTION_STYLE
     return CAPTION_STYLES.get(name, CAPTION_STYLES["hormozi"])
+
+
+# ── PIL-Based Text Rendering ────────────────────────────────────────────────
+
+def _render_text_to_image(text: str, font_size: int, color: str,
+                           stroke_color: str, stroke_width: int,
+                           max_width: int) -> np.ndarray:
+    """
+    Render text to a NumPy array using PIL (100% reliable, no MoviePy bugs).
+    Returns RGBA numpy array.
+    """
+    try:
+        font = ImageFont.truetype(BOLD_FONT, font_size)
+    except Exception:
+        font = ImageFont.load_default()
+
+    # Measure text size
+    dummy_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(dummy_img)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w = bbox[2] - bbox[0] + stroke_width * 2 + 20
+    text_h = bbox[3] - bbox[1] + stroke_width * 2 + 20
+
+    # Create transparent image
+    img = Image.new("RGBA", (max_width, text_h + 10), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Center text
+    x = (max_width - (bbox[2] - bbox[0])) // 2
+    y = 5
+
+    # Draw stroke (outline)
+    if stroke_width > 0:
+        for dx in range(-stroke_width, stroke_width + 1):
+            for dy in range(-stroke_width, stroke_width + 1):
+                if dx * dx + dy * dy <= stroke_width * stroke_width:
+                    draw.text((x + dx, y + dy), text, font=font, fill=stroke_color)
+
+    # Draw main text
+    draw.text((x, y), text, font=font, fill=color)
+
+    return np.array(img)
 
 
 # ── Main Function ────────────────────────────────────────────────────────────
@@ -92,15 +138,6 @@ def create_short(
 ) -> str:
     """
     Create a single YouTube Short from a video segment.
-
-    Pipeline:
-        1. Extract subclip
-        2. Crop to 9:16 vertical + zoom effect
-        3. Word-by-word captions with dark background
-        4. Hook card overlay
-        5. Background music mix
-        6. Export
-        7. Generate thumbnail
     """
     style = _get_style(caption_style)
 
@@ -114,9 +151,8 @@ def create_short(
     )
     console.print(f"   Style: [bold]{caption_style or CAPTION_STYLE}[/bold]")
     if music_path:
-        console.print(f"   Music: [bold]✅ enabled[/bold]\n")
-    else:
-        console.print("")
+        console.print(f"   Music: [bold]✅ enabled[/bold]")
+    console.print()
 
     # 1. Load and subclip
     console.print("   [1/7] Extracting subclip...")
@@ -132,6 +168,7 @@ def create_short(
     # 3. Word-by-word captions with background
     console.print("   [3/7] Adding captions...")
     segment_captions = _get_segment_captions(transcript, segment.start, segment.end)
+    console.print(f"   [dim]Found {len(segment_captions)} caption segments[/dim]")
     with_captions = _add_styled_captions(cropped, segment_captions, segment.start, style)
 
     # 4. Hook card overlay
@@ -144,7 +181,7 @@ def create_short(
         from src.music import mix_audio
         final = mix_audio(with_hook, music_path, music_volume=0.15)
     else:
-        console.print("   [5/7] No background music (use --music to add)")
+        console.print("   [5/7] No background music")
         final = with_hook
 
     # 6. Export
@@ -209,7 +246,6 @@ def _apply_zoom(clip):
         frame = get_frame(t)
         h, w = frame.shape[:2]
 
-        # Calculate zoomed crop
         new_w = int(w / scale)
         new_h = int(h / scale)
         x_offset = (w - new_w) // 2
@@ -217,7 +253,6 @@ def _apply_zoom(clip):
 
         cropped = frame[y_offset:y_offset + new_h, x_offset:x_offset + new_w]
 
-        # Resize back to original dimensions
         from PIL import Image as PILImage
         pil_img = PILImage.fromarray(cropped)
         pil_img = pil_img.resize((w, h), PILImage.LANCZOS)
@@ -228,28 +263,30 @@ def _apply_zoom(clip):
 
 # ── Captions ─────────────────────────────────────────────────────────────────
 
-def _get_segment_captions(transcript, start: float, end: float) -> list:
-    """Get transcript segments within the time range."""
+def _get_segment_captions(transcript, start: float, end: float) -> list[dict]:
+    """
+    Get transcript segments within the time range.
+    Returns simple dicts to avoid type() reconstruction bugs.
+    """
     captions = []
     for seg in transcript.segments:
         if seg.end > start and seg.start < end:
-            captions.append(type(seg)(
-                start=max(seg.start, start),
-                end=min(seg.end, end),
-                text=seg.text,
-            ))
+            captions.append({
+                "start": max(seg.start, start),
+                "end": min(seg.end, end),
+                "text": seg.text.strip(),
+            })
     return captions
 
 
-def _add_styled_captions(clip, captions: list, segment_start: float, style: dict):
+def _add_styled_captions(clip, captions: list[dict], segment_start: float, style: dict):
     """
-    Word-by-word captions with dark background bar.
-    Style determines: font size, colors, words per group, position.
+    Word-by-word captions using PIL rendering (reliable on all platforms).
     """
     if not captions:
         return clip
 
-    text_clips = []
+    overlay_clips = []
     font_size = style["font_size"]
     color = style["highlight_color"]
     stroke_color = style["stroke_color"]
@@ -260,12 +297,19 @@ def _add_styled_captions(clip, captions: list, segment_start: float, style: dict
     bg_enabled = style["bg_enabled"]
 
     for cap in captions:
-        words = cap.text.split()
+        text = cap["text"]
+        words = text.split()
         if not words:
             continue
 
-        cap_duration = cap.end - cap.start
-        local_start = cap.start - segment_start
+        cap_duration = cap["end"] - cap["start"]
+        local_start = cap["start"] - segment_start
+
+        # Ensure positive timing
+        if local_start < 0:
+            local_start = 0
+        if cap_duration <= 0:
+            continue
 
         # Split into word groups
         groups = []
@@ -281,46 +325,47 @@ def _add_styled_captions(clip, captions: list, segment_start: float, style: dict
             group_start = local_start + (gi * time_per_group)
             group_duration = time_per_group
 
+            if group_duration < 0.05:
+                continue
+
             display_text = group_text.upper() if uppercase else group_text
+
+            if not display_text.strip():
+                continue
 
             # Dark background bar
             if bg_enabled:
                 bg_clip = _create_caption_background(
-                    display_text, font_size, style, group_start, group_duration
+                    font_size, style, group_start, group_duration
                 )
                 if bg_clip:
-                    text_clips.append(bg_clip)
+                    overlay_clips.append(bg_clip)
 
-            # Main text
-            txt = TextClip(
-                text=display_text,
-                font_size=font_size,
-                color=color,
-                stroke_color=stroke_color,
-                stroke_width=stroke_width,
-                font=BOLD_FONT,
-                method="caption",
-                size=(SHORT_WIDTH - 120, None),
-                text_align="center",
+            # Render text using PIL (reliable!)
+            text_img = _render_text_to_image(
+                display_text, font_size, color, stroke_color,
+                stroke_width, SHORT_WIDTH - 80
             )
 
-            txt = txt.with_position(("center", pos_y))
-            txt = txt.with_start(group_start).with_duration(group_duration)
-            text_clips.append(txt)
+            txt_clip = (
+                ImageClip(text_img)
+                .with_position(("center", pos_y))
+                .with_start(group_start)
+                .with_duration(group_duration)
+            )
+            overlay_clips.append(txt_clip)
 
-    if not text_clips:
+    if not overlay_clips:
         return clip
 
-    return CompositeVideoClip([clip] + text_clips)
+    return CompositeVideoClip([clip] + overlay_clips)
 
 
-def _create_caption_background(text: str, font_size: int, style: dict,
+def _create_caption_background(font_size: int, style: dict,
                                 start: float, duration: float):
     """Create a semi-transparent dark bar behind caption text."""
     try:
-        # Estimate text height based on font size
-        text_height = font_size + 30
-        bar_height = text_height + 40
+        bar_height = font_size + 60
         pos_y = int(SHORT_HEIGHT * style["position_y"]) - 20
 
         bg = ColorClip(
@@ -350,20 +395,18 @@ def _add_hook_card(clip, hook_text: str):
         color=(0, 0, 0),
     ).with_duration(duration).with_opacity(0.55)
 
-    # Hook text
-    txt = TextClip(
-        text=hook_text.upper(),
-        font_size=HOOK_FONT_SIZE,
-        color="white",
-        stroke_color="black",
-        stroke_width=6,
-        font=BOLD_FONT,
-        method="caption",
-        size=(SHORT_WIDTH - 120, None),
-        text_align="center",
-    ).with_position(("center", int(SHORT_HEIGHT * 0.38))).with_duration(duration)
+    # Hook text using PIL rendering
+    hook_img = _render_text_to_image(
+        hook_text.upper(), HOOK_FONT_SIZE, "white", "black",
+        6, SHORT_WIDTH - 100
+    )
+    txt = (
+        ImageClip(hook_img)
+        .with_position(("center", int(SHORT_HEIGHT * 0.38)))
+        .with_duration(duration)
+    )
 
-    # Gold accent line below hook
+    # Gold accent line
     accent = ColorClip(
         size=(250, 5),
         color=(255, 215, 0),
@@ -371,16 +414,16 @@ def _add_hook_card(clip, hook_text: str):
         ("center", int(SHORT_HEIGHT * 0.55))
     ).with_opacity(0.9)
 
-    # "Swipe up" hint at bottom
-    hint = TextClip(
-        text="▶ WATCH TILL END",
-        font_size=30,
-        color="#AAAAAA",
-        font=BOLD_FONT,
-        method="caption",
-        size=(SHORT_WIDTH - 100, None),
-        text_align="center",
-    ).with_position(("center", int(SHORT_HEIGHT * 0.88))).with_duration(duration)
+    # "Watch till end" hint using PIL
+    hint_img = _render_text_to_image(
+        "▶ WATCH TILL END", 30, "#AAAAAA", "black",
+        2, SHORT_WIDTH - 100
+    )
+    hint = (
+        ImageClip(hint_img)
+        .with_position(("center", int(SHORT_HEIGHT * 0.88)))
+        .with_duration(duration)
+    )
 
     hook_section = CompositeVideoClip([
         clip.with_duration(duration),
@@ -400,7 +443,6 @@ def _generate_thumbnail(video_path: str, segment, safe_title: str,
     """Generate a thumbnail PNG from the best frame."""
     try:
         video = VideoFileClip(video_path)
-        # Pick frame at 30% into the segment (usually action is happening)
         thumb_time = segment.start + (segment.end - segment.start) * 0.3
         thumb_time = min(thumb_time, video.duration - 0.1)
 
@@ -438,7 +480,6 @@ def _generate_thumbnail(video_path: str, segment, safe_title: str,
             except Exception:
                 font = ImageFont.load_default()
 
-            # Word wrap
             words = hook_text.upper().split()
             lines = []
             current_line = ""
@@ -453,7 +494,6 @@ def _generate_thumbnail(video_path: str, segment, safe_title: str,
             if current_line:
                 lines.append(current_line)
 
-            # Draw text
             text_draw = ImageDraw.Draw(img)
             y_pos = int(SHORT_HEIGHT * 0.72)
             for line in lines:
@@ -461,12 +501,9 @@ def _generate_thumbnail(video_path: str, segment, safe_title: str,
                 text_w = bbox[2] - bbox[0]
                 x = (SHORT_WIDTH - text_w) // 2
 
-                # Black outline
                 for dx in range(-3, 4):
                     for dy in range(-3, 4):
                         text_draw.text((x + dx, y_pos + dy), line, font=font, fill="black")
-
-                # White text
                 text_draw.text((x, y_pos), line, font=font, fill="white")
                 y_pos += bbox[3] - bbox[1] + 10
 

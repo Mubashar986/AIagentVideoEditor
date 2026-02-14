@@ -19,7 +19,7 @@ console = Console()
 # Groq free tier limit: ~6000 tokens/request
 # System prompt + user prompt overhead ≈ 800 tokens
 # Leave room for response ≈ 1500 tokens
-MAX_TRANSCRIPT_CHARS = 10000  # ~3000 tokens for transcript
+MAX_TRANSCRIPT_CHARS = 7000  # ~2000 tokens for transcript
 
 
 @dataclass
@@ -132,7 +132,7 @@ Return ONLY a JSON array."""
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.7,
-        max_tokens=1500,
+        max_tokens=1000,
     )
 
     raw_content = response.choices[0].message.content.strip()

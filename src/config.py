@@ -30,7 +30,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 WHISPER_MODEL = "whisper-1"
 GPT_MODEL = "gpt-4o-mini"
 WHISPER_LOCAL_MODEL = os.getenv("WHISPER_LOCAL_MODEL", "base")
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama3-8b-8192"
 
 # ── Video / Shorts Settings ─────────────────────────────────────────────────
 SHORT_MIN_DURATION = 25
